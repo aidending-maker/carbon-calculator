@@ -13,7 +13,10 @@ import gdown
 # ========================================
 # 自動下載資料庫
 # ========================================
-資料庫_ID = "1dW5Y30M5Fz3Ec7a8QDHikxfRmEGL9ARb"
+資料庫_ID = st.secrets.get("GDRIVE_FILE_ID", "")
+if not 資料庫_ID:
+    st.error("❌ 系統設定錯誤，請聯絡管理員")
+    st.stop()
 資料庫_路徑 = "資料庫.xlsx"
 
 st.set_page_config(
