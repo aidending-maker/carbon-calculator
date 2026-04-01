@@ -1,0 +1,7 @@
+# 不上傳的檔案
+資料庫.xlsx
+設定.txt
+*.xlsx
+*.html
+__pycache__/
+*.pyc
