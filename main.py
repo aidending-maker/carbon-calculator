@@ -23,6 +23,11 @@ else:
 係數資料庫檔 = "資料庫.xlsx"
 API_KEY_檔   = "設定.txt"
 時間戳記 = datetime.datetime.now().strftime("%Y%m%d_%H%M")
+safe名稱  = ""
+清冊檔   = f"資源清冊_{時間戳記}.xlsx"
+比對檔   = f"係數比對_{時間戳記}.xlsx"
+計算檔   = f"碳足跡計算_{時間戳記}.xlsx"
+儀表板檔 = f"儀表板_{時間戳記}.html"
 
 高信心門檻 = 75
 低信心門檻 = 45
