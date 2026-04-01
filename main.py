@@ -77,106 +77,220 @@ if not os.path.exists(係數資料庫檔):
     sys.exit(1)
 
 # ========================================
+# ========================================
 # 模組一：讀取 XML
 # ========================================
 print(f"\n📂 模組一：讀取 XML 預算書")
+print(f"  檔案：{XML_檔名}")
 
-NS = {"ns": "http://pcstd.pcc.gov.tw/2003/eTender"}
 tree = ET.parse(XML_檔名)
 root = tree.getroot()
 
-標案名稱 = root.find(".//ns:ContractTitle[@language='zh-TW']", NS).text.strip()
-機關名稱 = root.find(".//ns:ProcuringEntity[@language='zh-TW']", NS).text.strip()
-地點_el  = root.find(".//ns:ContractLocation", NS)
-地點     = 地點_el.text.strip() if 地點_el is not None and 地點_el.text else "未填寫"
+# 自動偵測格式
+格式 = "未知"
+if "ETenderSheet" in root.tag or root.find(".//{http://pcstd.pcc.gov.tw/2003/eTender}ContractTitle") is not None:
+    格式 = "eTender"
+elif root.tag == "預算書":
+    格式 = "Excel轉XML"
+
+print(f"  格式：{格式}")
+
+工項清單 = []
+資源清單 = []
+標案名稱 = ""
+機關名稱 = ""
+地點 = "未填寫"
+
+def 判斷資源類型(代碼):
+    if str(代碼).startswith("L"): return "人工"
+    elif str(代碼).startswith("E"): return "機具"
+    elif str(代碼).startswith("M"): return "材料"
+    else: return "其他"
+
+# ----------------------------------------
+# 格式一：eTender 標準格式
+# ----------------------------------------
+if 格式 == "eTender":
+    NS = {"ns": "http://pcstd.pcc.gov.tw/2003/eTender"}
+
+    標案名稱 = root.find(".//ns:ContractTitle[@language='zh-TW']", NS).text.strip()
+    機關名稱 = root.find(".//ns:ProcuringEntity[@language='zh-TW']", NS).text.strip()
+    地點_el  = root.find(".//ns:ContractLocation", NS)
+    地點     = 地點_el.text.strip() if 地點_el is not None and 地點_el.text else "未填寫"
+
+    def 解析工項_eTender(pay_item, 上層工程="", 層級=0):
+        名稱_el = pay_item.find("ns:Description[@language='zh-TW']", NS)
+        名稱    = 名稱_el.text.strip() if 名稱_el is not None and 名稱_el.text else ""
+        單位_el = pay_item.find("ns:Unit[@language='zh-TW']", NS)
+        單位    = 單位_el.text.strip() if 單位_el is not None and 單位_el.text else ""
+        數量_el = pay_item.find("ns:Quantity", NS)
+        數量    = float(數量_el.text) if 數量_el is not None else 0
+        項次    = pay_item.get("itemNo", "")
+        種類    = pay_item.get("itemKind", "")
+        代碼    = pay_item.get("refItemCode", "").strip()
+        單價_el = pay_item.find("ns:Price", NS)
+        單價    = float(單價_el.text) if 單價_el is not None and 單價_el.text else 0
+
+        def 取比例(標籤):
+            el = pay_item.find(f"ns:{標籤}", NS)
+            return float(el.text) if el is not None and el.text else 0
+
+        if 種類 == "mainItem":
+            for 子項 in pay_item.findall("ns:PayItem", NS):
+                解析工項_eTender(子項, 名稱, 層級+1)
+        else:
+            工項清單.append({
+                "所屬工程": 上層工程, "項次": 項次,
+                "工項名稱": 名稱, "參考代碼": 代碼,
+                "單位": 單位, "數量": 數量, "單價": 單價,
+                "種類": 種類,
+                "人工比例": 取比例("LabourRatio"),
+                "機具比例": 取比例("EquipmentRatio"),
+                "材料比例": 取比例("MaterialRatio"),
+                "雜項比例": 取比例("MiscellaneaRatio"),
+            })
+            for 子項 in pay_item.findall("ns:PayItem", NS):
+                解析工項_eTender(子項, 上層工程, 層級+1)
+
+    detail_list = root.find(".//ns:DetailList", NS)
+    if detail_list is not None:
+        for pay_item in detail_list.findall("ns:PayItem", NS):
+            解析工項_eTender(pay_item)
+
+    for work_item in root.findall(".//ns:WorkItem[@refItemNo]", NS):
+        工項參考號 = work_item.get("refItemNo", "")
+        工項名稱_el = work_item.find("ns:Description[@language='zh-TW']", NS)
+        工項名稱 = 工項名稱_el.text.strip() if 工項名稱_el is not None else ""
+        for 資源 in work_item.findall("ns:WorkItem", NS):
+            資源代碼 = 資源.get("itemCode", "")
+            名稱_el  = 資源.find("ns:Description[@language='zh-TW']", NS)
+            名稱     = 名稱_el.text.strip() if 名稱_el is not None else ""
+            單位_el  = 資源.find("ns:Unit[@language='zh-TW']", NS)
+            單位     = 單位_el.text.strip() if 單位_el is not None and 單位_el.text else ""
+            數量_el  = 資源.find("ns:Quantity", NS)
+            數量     = float(數量_el.text) if 數量_el is not None else 0
+            單價_el  = 資源.find("ns:Price", NS)
+            單價     = float(單價_el.text) if 單價_el is not None and 單價_el.text else 0
+            備註_el  = 資源.find("ns:Remark", NS)
+            備註     = 備註_el.text.strip() if 備註_el is not None and 備註_el.text else ""
+            資源清單.append({
+                "所屬工項參考號": 工項參考號,
+                "所屬工項名稱":   工項名稱,
+                "資源代碼":       資源代碼,
+                "資源類型":       判斷資源類型(資源代碼),
+                "資源名稱":       名稱,
+                "單位":           單位,
+                "單位數量":       數量,
+                "單價":           單價,
+                "備註":           備註,
+            })
+
+# ----------------------------------------
+# 格式二：Excel 轉 XML 格式
+# ----------------------------------------
+elif 格式 == "Excel轉XML":
+
+    def 取儲存格(row, col):
+        cell = row.find(f'cell[@col="{col}"]')
+        return cell.text.strip() if cell is not None and cell.text else ""
+
+    ws_詳細 = root.find('worksheet[@name="預算詳細表"]')
+    if ws_詳細 is None:
+        ws_詳細 = list(root.findall('worksheet'))[1]
+
+    rows_all = ws_詳細.findall('row')
+    if rows_all:
+        機關名稱 = 取儲存格(rows_all[0], '0')
+
+    for row in ws_詳細.findall('row'):
+        col0 = 取儲存格(row, '0')
+        col1 = 取儲存格(row, '1')
+        if col0 == '工程名稱' and col1:
+            標案名稱 = col1
+        elif col0 == '施工地點' and col1:
+            地點 = col1
+
+    目前工程 = ""
+    for row in ws_詳細.findall('row'):
+        col0 = 取儲存格(row, '0')
+        col1 = 取儲存格(row, '1')
+        col2 = 取儲存格(row, '2')
+        col3 = 取儲存格(row, '3')
+        col4 = 取儲存格(row, '4')
+        col6 = 取儲存格(row, '6')
+
+        if not col0 or not col1:
+            continue
+
+        if '(' in col0 and col2:
+            try:
+                工項清單.append({
+                    "所屬工程": 目前工程,
+                    "項次":     col0,
+                    "工項名稱": col1,
+                    "參考代碼": col6.split(',')[0] if col6 else "",
+                    "單位":     col2,
+                    "數量":     float(col3) if col3 else 0,
+                    "單價":     float(col4) if col4 else 0,
+                    "種類":     "workItem",
+                    "人工比例": 0, "機具比例": 0,
+                    "材料比例": 0, "雜項比例": 0,
+                })
+            except: pass
+        elif col0 and '(' not in col0 and col1 and not col2:
+            目前工程 = col1
+
+    ws_分析 = root.find('worksheet[@name="預算單價分析表"]')
+    if ws_分析 is not None:
+        目前工項項次 = ""
+        目前工項名稱 = ""
+        讀取資源中 = False
+
+        for row in ws_分析.findall('row'):
+            col0 = 取儲存格(row, '0')
+            col1 = 取儲存格(row, '1')
+            col2 = 取儲存格(row, '2')
+            col3 = 取儲存格(row, '3')
+            col4 = 取儲存格(row, '4')
+            col6 = 取儲存格(row, '6')
+
+            if col0 and '工作項目：' in col1:
+                目前工項項次 = col0
+                目前工項名稱 = col1.replace('工作項目：','').strip()
+                讀取資源中 = False
+                continue
+
+            if col1 == '工料名稱':
+                讀取資源中 = True
+                continue
+
+            if col1 == '合計':
+                讀取資源中 = False
+                continue
+
+            if 讀取資源中 and col1 and col6:
+                編碼 = col6.split(',')[0].strip()
+                if 編碼 and len(編碼) > 0 and 編碼[0] in 'ELMW':
+                    try:
+                        資源清單.append({
+                            "所屬工項參考號": 目前工項項次,
+                            "所屬工項名稱":   目前工項名稱,
+                            "資源代碼":       編碼,
+                            "資源類型":       判斷資源類型(編碼),
+                            "資源名稱":       col1,
+                            "單位":           col2,
+                            "單位數量":       float(col3) if col3 else 0,
+                            "單價":           float(col4) if col4 else 0,
+                            "備註":           "",
+                        })
+                    except: pass
+
+else:
+    print(f"  ❌ 不支援的 XML 格式，請聯絡系統管理員")
+    sys.exit(1)
 
 print(f"  標案：{標案名稱}")
 print(f"  機關：{機關名稱}")
-
-safe名稱  = 標案名稱[:20].replace("/","_").replace("\\","_")
-輸出前綴  = f"{safe名稱}_{時間戳記}"
-清冊檔   = f"{輸出前綴}_資源清冊.xlsx"
-比對檔   = f"{輸出前綴}_係數比對.xlsx"
-計算檔   = f"{輸出前綴}_碳足跡計算.xlsx"
-儀表板檔 = f"{輸出前綴}_儀表板.html"
-
-工項清單 = []
-
-def 解析工項(pay_item, 上層工程="", 層級=0):
-    名稱_el = pay_item.find("ns:Description[@language='zh-TW']", NS)
-    名稱    = 名稱_el.text.strip() if 名稱_el is not None and 名稱_el.text else ""
-    單位_el = pay_item.find("ns:Unit[@language='zh-TW']", NS)
-    單位    = 單位_el.text.strip() if 單位_el is not None and 單位_el.text else ""
-    數量_el = pay_item.find("ns:Quantity", NS)
-    數量    = float(數量_el.text) if 數量_el is not None else 0
-    項次    = pay_item.get("itemNo", "")
-    種類    = pay_item.get("itemKind", "")
-    代碼    = pay_item.get("refItemCode", "").strip()
-    單價_el = pay_item.find("ns:Price", NS)
-    單價    = float(單價_el.text) if 單價_el is not None and 單價_el.text else 0
-
-    def 取比例(標籤):
-        el = pay_item.find(f"ns:{標籤}", NS)
-        return float(el.text) if el is not None and el.text else 0
-
-    if 種類 == "mainItem":
-        for 子項 in pay_item.findall("ns:PayItem", NS):
-            解析工項(子項, 名稱, 層級+1)
-    else:
-        工項清單.append({
-            "所屬工程": 上層工程, "項次": 項次,
-            "工項名稱": 名稱, "參考代碼": 代碼,
-            "單位": 單位, "數量": 數量, "單價": 單價,
-            "種類": 種類,
-            "人工比例": 取比例("LabourRatio"),
-            "機具比例": 取比例("EquipmentRatio"),
-            "材料比例": 取比例("MaterialRatio"),
-            "雜項比例": 取比例("MiscellaneaRatio"),
-        })
-        for 子項 in pay_item.findall("ns:PayItem", NS):
-            解析工項(子項, 上層工程, 層級+1)
-
-detail_list = root.find(".//ns:DetailList", NS)
-if detail_list is not None:
-    for pay_item in detail_list.findall("ns:PayItem", NS):
-        解析工項(pay_item)
-
-資源清單 = []
-
-def 判斷資源類型(代碼):
-    if 代碼.startswith("L"): return "人工"
-    elif 代碼.startswith("E"): return "機具"
-    elif 代碼.startswith("M"): return "材料"
-    else: return "其他"
-
-for work_item in root.findall(".//ns:WorkItem[@refItemNo]", NS):
-    工項參考號 = work_item.get("refItemNo", "")
-    工項名稱_el = work_item.find("ns:Description[@language='zh-TW']", NS)
-    工項名稱 = 工項名稱_el.text.strip() if 工項名稱_el is not None else ""
-    for 資源 in work_item.findall("ns:WorkItem", NS):
-        資源代碼 = 資源.get("itemCode", "")
-        名稱_el  = 資源.find("ns:Description[@language='zh-TW']", NS)
-        名稱     = 名稱_el.text.strip() if 名稱_el is not None else ""
-        單位_el  = 資源.find("ns:Unit[@language='zh-TW']", NS)
-        單位     = 單位_el.text.strip() if 單位_el is not None and 單位_el.text else ""
-        數量_el  = 資源.find("ns:Quantity", NS)
-        數量     = float(數量_el.text) if 數量_el is not None else 0
-        單價_el  = 資源.find("ns:Price", NS)
-        單價     = float(單價_el.text) if 單價_el is not None and 單價_el.text else 0
-        備註_el  = 資源.find("ns:Remark", NS)
-        備註     = 備註_el.text.strip() if 備註_el is not None and 備註_el.text else ""
-        資源清單.append({
-            "所屬工項參考號": 工項參考號,
-            "所屬工項名稱":   工項名稱,
-            "資源代碼":       資源代碼,
-            "資源類型":       判斷資源類型(資源代碼),
-            "資源名稱":       名稱,
-            "單位":           單位,
-            "單位數量":       數量,
-            "單價":           單價,
-            "備註":           備註,
-        })
-
 print(f"  ✅ 工項：{len(工項清單)} 個，人機料：{len(資源清單)} 筆")
 
 wb1 = openpyxl.Workbook()
