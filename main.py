@@ -227,6 +227,11 @@ elif 格式 == "Excel轉XML":
         if not col0 or not col1:
             continue
 
+         # 結尾是 ) 的是工程分類，不是工項
+        if '(' in col0 and col0.strip().endswith(')'):
+            目前工程 = col1
+            continue
+
         if '(' in col0 and col2:
             try:
                 工項清單.append({
