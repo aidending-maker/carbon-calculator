@@ -233,7 +233,6 @@ elif 格式 == "Excel轉XML":
             continue
 
         if '(' in col0 and col2:
-            try:
                 工項清單.append({
                     "所屬工程": 目前工程,
                     "項次":     col0,
