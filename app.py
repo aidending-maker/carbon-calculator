@@ -85,7 +85,7 @@ with st.sidebar:
     st.divider()
     st.subheader("📝 上傳者資訊（選填）")
     上傳單位 = st.text_input("公司／單位名稱", placeholder="例：山椒魚永續工程")
-    上傳案名 = st.text_input("工程案名稱", placeholder="例：曾文溪護岸工程")
+    上傳案名 = st.text_input("工程案名稱", placeholder="例：海水淡化廠工程")
     開始計算 = st.button("▶ 開始計算", type="primary", use_container_width=True)
 
 # ========================================
